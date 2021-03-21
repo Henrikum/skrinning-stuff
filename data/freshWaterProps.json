@@ -1,0 +1,33 @@
+{
+    "units": {
+        "pressure": "kPa",
+        "temperature": "°C",
+        "rho": "kg/m3",
+        "cp": "J/(kg K)",
+        "lambda": "W/(m K)",
+        "enthalpy": "kJ/kg"
+    },
+    "conditions": {
+        "pressure": 101.325,
+        "temperature": 0.0
+    },
+    "solid": {
+        "rho": 916.8,
+        "cp": 2114.0,
+        "lambda": 2.21
+    },
+    "liqid": {
+        "rho": 999.8,
+        "cp": 4218.0,
+        "lambda": 0.56
+    },
+    "gas": {
+        "rho": 1.293,
+        "cp": 1005.0,
+        "lambda": 0.0243
+    },
+    "enthalpy": {
+        "fusion": 333.4,
+        "evaporation": 2500.8
+    }
+}

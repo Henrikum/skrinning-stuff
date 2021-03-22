@@ -4,6 +4,9 @@
 import os
 import json
 
+import geomUtils
+
+
 class IceSheet():
     """[summary]
     """
@@ -18,6 +21,7 @@ class IceSheet():
         self._iceType = type
         self._h0 = thickness
         self._crystSize = crystalSize
+        self._crystType = 'hex'
 
         currentDir = os.getcwd()
         dataFilePath = os.path.join(currentDir, '../data' )
@@ -26,4 +30,7 @@ class IceSheet():
         water = json.load(dataFile)
         dataFile.close()
         self._ice = water['solid']
+
+    def getBorderDensity(self):
+        return geomUtils.periphery(geom=self.crystType, dims=[self._crystSize])/geomUtils.area(geom=self.crystType, dims=[self._crystSize])
 

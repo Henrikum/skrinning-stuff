@@ -1,0 +1,22 @@
+{
+    "units": {
+        "albedo": "--",
+        "absorptionCoefficient": "1/m",
+        "density": "kg/m3"
+    },
+    "blackIce": {
+        "albedo": 0.2,
+        "absorptionCoefficient": 1.2,
+        "density": 917.0
+    },
+    "snowIce": {
+        "albedo": 0.5,
+        "absorptionCoefficient": 10.0,
+        "density": 880.0
+    },
+    "snow": {
+        "albedo": 0.8,
+        "absorptionCoefficient": 20.0,
+        "density": 300.0
+    }
+}

@@ -19,36 +19,34 @@ class IceSheet():
     """[summary]
     """
 
-    def __init__(self, type='lake', thickness=10.0, crystalSize=100.0):
+    def __init__(self, iceType='blackIce', thickness=10.0, crystalSize=100.0):
         """[summary]
 
         Args:
-            type (str, optional): Type of water that the ice is formed in. Defaults to 'lake'.
+            iceType (str, optional): Type of ice being analyzed. Defaults to 'blackIce'.
             thickness (float, optional): Initial thickness of icesheet (mm). Defaults to 10 mm.
             crystalSize (float, optional): Crystal size (mm). Defaults to 100 mm.
         """
-        # TODO: iceType = ['blackIce', 'snowIce', 'seaIce', ...]
-        self._iceType = type
+        self._iceType = iceType
         self._h0 = thickness*0.001  # m
         self._crystSize = crystalSize*0.001  # m
         self._crystType = 'hex'
 
+        # pure water properties
         currentDir = os.getcwd()
         dataFilePath = os.path.join(currentDir, '../data' )
-        dataFilePath = os.path.join(dataFilePath, 'freshWaterProps.json')
-        dataFile = open(dataFilePath, 'r')
+        dataFile = open(os.path.join(dataFilePath, 'pureWaterProps.json'), 'r')
         water = json.load(dataFile)
         dataFile.close()
-        self._ice = water['solid']
+        self._pureIce = water['solid']
 
-        # TODO: read from ice property .json
-        # self._I0 = 80.  # W/m2
-        # self._alpha = 1.2  # 1/m
-        self._I0 = 50.  # W/m2
-        self._alpha = 10.  # 1/m
+        # lake ice properties
+        dataFile = open(os.path.join(dataFilePath, 'lakeIceProps.json'), 'r')
+        ice = json.load(dataFile)
+        dataFile.close()
+        self._ice = ice[iceType]
 
         print('Ice type: {}'.format(self._iceType))
-        print('I0 = {:.3f}, alpha = {:.3f}'.format(self._I0, self._alpha))
 
 
     def getBorderDensity(self):
@@ -69,7 +67,16 @@ class IceSheet():
         return (T - TLo)/(THi - TLo)
 
 
-    def setupModel(self, IC=[-4., 0.], windSpeed=5., aEnv=[0., 0.75, 0.25], TEnv=[-2.0, -20.0, -270.], Nx=51, Ny=101):
+    def setupModel(
+        self, 
+        IC=[-4., 0.], 
+        windSpeed=5., 
+        aEnv=[0., 0.75, 0.25], 
+        TEnv=[-2.0, -20.0, -270.], 
+        S0=100.,
+        Nx=51, 
+        Ny=101
+    ):
         # process
         TAmb = TEnv[0]  # °C
         TAtm = TEnv[1]  # °C
@@ -83,12 +90,17 @@ class IceSheet():
         aAtm = aEnv[1]
         aSpc = 1 - aAmb - aAtm
 
+        I0 = (1 - self._ice['albedo'])*S0  # W/m2
+        print('I0 = {:.3f} W/m2'.format(I0))
+
         # properties
-        lmbda = self._ice['lambda']  # W/(m K)
-        rho = self._ice['rho']  # kg/m3
-        cp = self._ice['cp']  # J/(kg K)
+        lmbda = self._pureIce['lambda']  # W/(m K)
+        rho = self._pureIce['rho']  # kg/m3
+        cp = self._pureIce['cp']  # J/(kg K)
         a = lmbda/rho/cp  # m2/s
+        alpha = self._ice['absorptionCoefficient']
         print('thermal diffusivity a = {:.2e} m2/s'.format(a))
+        print('absorption coefficient alpha = {:.3f} 1/m'.format(alpha))
 
         # spatial grid
         zScale = self._h0  # m
@@ -105,9 +117,7 @@ class IceSheet():
         print('temporal stepsize dt = {:.2f} s'.format(tStep))
         print('timescale tScale = {:.1f} s'.format(tScale))
 
-        # parameters
-        # sigma = a*dt/(2.*dz**2) = a*(tScale*dy)/(2.*(LScale*dx)**2) = dy/(2.*dx)
-        # sigma = a*(tScale*dy)/(2.*(LScale*dx)**2)
+        # parameter: sigma = a*dt/(2.*dz**2) = a*(tScale*dy)/(2.*(LScale*dx)**2) = dy/(2.*dx)
         sigma = dy/2./dx**2
         print('sigma = {}'.format(sigma))
 
@@ -125,8 +135,8 @@ class IceSheet():
         print('qRad = {:.0f} W/m2, alphaRad = {:.0f} W/(m2 K), Bi = {:.2e}'.format(qRad, alphaRad, Bi))
 
         # sun irradiance (differentiated, non-dimensionalized)
-        i0 = self._I0/(lmbda/self._h0)/(THi - TLo)
-        alphah = self._alpha*self._h0
+        i0 = I0/(lmbda/self._h0)/(THi - TLo)
+        alphah = alpha*self._h0
         print('i0 = {:.3f}'.format(i0))
         print('non-dim irradiance source term at top, bottom = {:.3f}, {:.3f}'.format(
             self.nonDimIrradSource(0, dx, 1, i0, alphah), self.nonDimIrradSource(Nx, dx, 1, i0, alphah))

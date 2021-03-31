@@ -53,7 +53,7 @@ class IceSheet():
         return geomUtils.periphery(geom=self.crystType, dims=[self._crystSize])/geomUtils.area(geom=self.crystType, dims=[self._crystSize])
 
 
-    def _u(self, T, THi, TLo):
+    def _u(self, T):
         """Returns the non-dimensional temperature u.
 
         Args:
@@ -64,7 +64,11 @@ class IceSheet():
         Returns:
             float: the non-dimensional temperature (---)
         """
-        return (T - TLo)/(THi - TLo)
+        return (T - self._TLo)/(self._THi - self._TLo)
+
+
+    def _T(self, u):
+        return u*(self._THi - self._TLo) + self._TLo
 
 
     def setupModel(
@@ -119,16 +123,30 @@ class IceSheet():
         self._THi = 0.  # °C
         self._TLo = TEnv[0]  # TAmb; °C
 
+        # IC, linear
+        self.setIC(IC)
+
         # set self._b
         self.setSourceVector(S0)
 
         # apply BCs
-        A, B, b = self.applyBCs(IC, aEnv, TEnv)
+        A, B, b = self.applyBCs(aEnv, TEnv)
 
-        # IC, linear
-        UInit = self.setIC(IC)
+        U = self._IC
 
-        return A, B, b, UInit
+        return A, B, b, U
+
+
+    def setIC(self, IC):
+        if len(IC) == 2:
+            TInit = np.linspace(IC[0], IC[-1], self._Nx)
+        else:
+            TInit = IC
+        UInit = self._u(TInit)
+        self._IC = UInit
+
+    def getIC(self):
+        return self._IC
 
 
     def setSourceVector(self, S0):
@@ -139,11 +157,11 @@ class IceSheet():
         self._b = np.array([self.nonDimIrradSource(j, self._dx, self._dy, i0, absh) for j in range(self._Nx)])
 
 
-    def applyBCs(self, IC, aEnv, TEnv):
+    def applyBCs(self, aEnv, TEnv):
         TAmb = TEnv[0]  # °C
         TAtm = TEnv[1]  # °C
         TSpc = TEnv[2]  # °C
-        TSurfAve = np.array(IC).mean()  # °C
+        TTop = self._T(self._IC[0])  # °C
         aEnv = aEnv/np.array(aEnv).sum()  # rescale if not sum to 1
         aAmb = aEnv[0]
         aAtm = aEnv[1]
@@ -154,9 +172,9 @@ class IceSheet():
             aAmb*np.power(TAmb+DT_K, 4) 
             + aAtm*np.power(TAtm+DT_K, 4) 
             + aSpc*np.power(TSpc+DT_K, 4) 
-            - np.power(TSurfAve+DT_K, 4)
+            - np.power(TTop+DT_K, 4)
         )
-        alphaRad = qRad/(TSurfAve - TAmb)
+        alphaRad = qRad/(TTop - TAmb + 0.0001)
         # TODO: alphaConv, use windSpeed to get alphaConv
         alphaConv = 100.
         Bi = (alphaRad + alphaConv)*self._h0/self._pureIce['lambda']
@@ -179,16 +197,10 @@ class IceSheet():
         # does not change A, B
 
         # boundary conditions in source term vector
-        b[0] = b[0] + 4*sigma*dx*Bi*self._u(TAmb, self._THi, self._TLo)
-        b[-1] = b[-1] + 2*sigma*self._u(IC[-1], self._THi, self._TLo)
+        b[0] = b[0] + 4*sigma*dx*Bi*self._u(TAmb)
+        b[-1] = b[-1] + 2*sigma*self._IC[-1]
 
         return A, B, b
-
-
-    def setIC(self, IC):
-        TInit = np.linspace(IC[0], IC[1], self._Nx)
-        UInit = self._u(TInit, self._THi, self._TLo)
-        return UInit
 
 
     def nonDimIrradSource(self, j, dx, dy, i0, alphah):

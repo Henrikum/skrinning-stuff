@@ -6,6 +6,8 @@ import json
 import numpy as np
 import scipy.sparse as ss
 
+import datetime
+import solarpy
 
 import geomUtils
 
@@ -19,7 +21,7 @@ class IceSheet():
     """[summary]
     """
 
-    def __init__(self, iceType='blackIce', thickness=10.0, crystalSize=100.0):
+    def __init__(self, dateTime, lat=55.71, alt=10, iceType='blackIce', thickness=10.0, crystalSize=100.0):
         """[summary]
 
         Args:
@@ -27,6 +29,15 @@ class IceSheet():
             thickness (float, optional): Initial thickness of icesheet (mm). Defaults to 10 mm.
             crystalSize (float, optional): Crystal size (mm). Defaults to 100 mm.
         """
+        # when
+        self._dateTimeStart = dateTime
+
+        # where
+        self._vnorm = np.array([0, 0, -1])  # plane pointing zenith
+        self._lat = lat  # °
+        self._alt = alt  # m (above sea-level)
+
+        # what
         self._iceType = iceType
         self._h0 = thickness*0.001  # m
         self._crystSize = crystalSize*0.001  # m
@@ -46,7 +57,9 @@ class IceSheet():
         dataFile.close()
         self._ice = ice[iceType]
 
-        print('Ice type: {}'.format(self._iceType))
+        print('When: {}'.format(self._dateTimeStart))
+        print('Where: lat = {:.2f}°, alt = {:.0f} m'.format(self._lat, self._alt))
+        print('What: {}'.format(self._iceType))
 
 
     def getBorderDensity(self):
@@ -54,16 +67,6 @@ class IceSheet():
 
 
     def _u(self, T):
-        """Returns the non-dimensional temperature u.
-
-        Args:
-            T (float): the temperature (°C or K)
-            THi (float): the high characteristic temperature of the system (°C or K)
-            TLo (float): the low characteristic temperature of the system (°C or K)
-
-        Returns:
-            float: the non-dimensional temperature (---)
-        """
         return (T - self._TLo)/(self._THi - self._TLo)
 
 
@@ -77,9 +80,8 @@ class IceSheet():
         windSpeed=5., 
         aEnv=[0., 0.75, 0.25], 
         TEnv=[-2.0, -20.0, -270.], 
-        S0=100.,
-        Nx=51, 
-        Ny=101,
+        zNodes=51, 
+        tStep=120,
         isVerbose=False
     ):
 
@@ -91,16 +93,20 @@ class IceSheet():
         if isVerbose:
             print('thermal diffusivity a = {:.2e} m2/s'.format(a))
 
+        # sun stuff
+        S0 = solarpy.irradiance_on_plane(self._vnorm, self._alt, self._dateTimeStart, self._lat)
+
         # spatial grid
         zScale = self._h0  # m
-        zStep = zScale/(Nx - 1)
+        zStep = zScale/(zNodes - 1)
         dx = zStep/zScale
         if isVerbose:
             print('spatial stepsize dz = {:.2f} mm'.format(zStep*1000))
 
         # temporal grid
         tScale = zScale**2/a  # s
-        tStep = tScale/(Ny - 1)  # s
+        # tStep = tScale/(Ny - 1)  # s
+        # Ny = tScale/tStep + 1
         dy = tStep/tScale
         if isVerbose:
             print('temporal stepsize dt = {:.2f} s'.format(tStep))
@@ -112,12 +118,14 @@ class IceSheet():
             print('sigma = {}'.format(sigma))
 
         # set up matrices (will not change with time)
+        Nx = zNodes
         self._A = ss.diags([-sigma, 1 + 2*sigma, -sigma], [-1, 0, 1], shape=(Nx, Nx)).toarray()
         self._B = ss.diags([sigma, 1 - 2*sigma, sigma], [-1, 0, 1], shape=(Nx, Nx)).toarray()
 
         # store useful constants
         self._Nx = Nx
         self._dx = dx
+        self._tStep = tStep
         self._dy = dy
         self._sigma = sigma
         self._THi = 0.  # °C
@@ -205,3 +213,38 @@ class IceSheet():
 
     def nonDimIrradSource(self, j, dx, dy, i0, alphah):
         return i0*alphah*dy*np.exp(-alphah*j*dx)
+
+
+    def simulate(self, U, aEnv, TEnv, timeStepCount):
+        dateTime = self._dateTimeStart
+        S0 = solarpy.irradiance_on_plane(self._vnorm, self._alt, dateTime, self._lat)
+        clockHour = 0
+        time = 0
+
+        dateTimes = []
+        S0s = []
+        tSoln = []
+        USoln = []
+        for step in range(timeStepCount):
+            dateTimes.append(dateTime)
+            S0s.append(S0)
+            tSoln.append(clockHour)
+            
+            # compute porosity epsilon(t)
+        #     meltRate = 
+            
+            USoln.append(U)
+
+            time = (step + 1)*self._tStep
+            clockHour = (6 + time/3600) % 24
+            dateTime = self._dateTimeStart + datetime.timedelta(seconds=+time)
+            S0 = solarpy.irradiance_on_plane(self._vnorm, self._alt, dateTime, self._lat)
+            self.setSourceVector(S0)
+            A, B, b = self.applyBCs(aEnv, TEnv)
+            U = np.linalg.solve(A, B.dot(U) + b)  
+            # Note that the U on the right-hand side is the IC for this round's integration
+            
+            # output also: bIrradiance, porosity(z), ...
+            
+        USoln = np.array(USoln)
+        return dateTimes, S0s, USoln

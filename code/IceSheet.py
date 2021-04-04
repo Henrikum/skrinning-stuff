@@ -50,6 +50,7 @@ class IceSheet():
         water = json.load(dataFile)
         dataFile.close()
         self._pureIce = water['solid']
+        self._pureIceDH = water['enthalpy']
 
         # lake ice properties
         dataFile = open(os.path.join(dataFilePath, 'lakeIceProps.json'), 'r')
@@ -225,17 +226,20 @@ class IceSheet():
         S0s = []
         tSoln = []
         USoln = []
-        epss = []
+        epsSoln = []
         for step in range(timeStepCount):
             dateTimes.append(dateTime)
             S0s.append(S0)
             tSoln.append(clockHour)
             
-            # compute porosity epsilon(t)
-            DUMelt = U[U > 1].sum()
-            DTMelt = self._T(DUMelt)
-            porosity = self._pureIce['rho']*self._pureIce['cp']*DTMelt/(self._pureIce['fusion']*1000)
-            epss.append(porosity)
+            # compute porosity epsilon(t, z)
+            DTMelt = np.maximum(0, self._T(U) - 0)
+            # DTMelt = T[T > 0]
+            porosity = self._pureIce['cp']*DTMelt/(self._pureIceDH['fusion']*1000)  # *self._dx
+            epsSoln.append(porosity)
+
+            # limit U (due to melting)
+            U = np.minimum(U, np.full(len(U), 1))
 
         #     meltRate = 
             
@@ -252,5 +256,7 @@ class IceSheet():
             
             # output also: bIrradiance, porosity(z), ...
             
+        S0s = np.array(S0s)
         USoln = np.array(USoln)
-        return dateTimes, S0s, USoln, epss
+        epsSoln = np.array(epsSoln)
+        return dateTimes, S0s, USoln, epsSoln

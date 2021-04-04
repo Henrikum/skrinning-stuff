@@ -225,12 +225,18 @@ class IceSheet():
         S0s = []
         tSoln = []
         USoln = []
+        epss = []
         for step in range(timeStepCount):
             dateTimes.append(dateTime)
             S0s.append(S0)
             tSoln.append(clockHour)
             
             # compute porosity epsilon(t)
+            DUMelt = U[U > 1].sum()
+            DTMelt = self._T(DUMelt)
+            porosity = self._pureIce['rho']*self._pureIce['cp']*DTMelt/(self._pureIce['fusion']*1000)
+            epss.append(porosity)
+
         #     meltRate = 
             
             USoln.append(U)
@@ -247,4 +253,4 @@ class IceSheet():
             # output also: bIrradiance, porosity(z), ...
             
         USoln = np.array(USoln)
-        return dateTimes, S0s, USoln
+        return dateTimes, S0s, USoln, epss

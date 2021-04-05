@@ -7,7 +7,7 @@
     "blackIce": {
         "albedo": 0.2,
         "absorptionCoefficient": 1.2,
-        "density": 917.0
+        "density": 916.8
     },
     "snowIce": {
         "albedo": 0.5,
@@ -18,5 +18,10 @@
         "albedo": 0.8,
         "absorptionCoefficient": 20.0,
         "density": 300.0
+    },
+    "freshWater": {
+        "albedo": 0.0,
+        "absorptionCoefficient": 0.1,
+        "density": 999.8
     }
 }

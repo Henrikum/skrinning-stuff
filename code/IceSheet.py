@@ -85,6 +85,25 @@ class IceSheet():
         return u*(self._THi - self._TLo) + self._TLo
 
 
+    def fEddy(self, alpha, fLmbdaEddy):
+        """
+        fEddy(for lambda) = fEddy(for sigma)
+
+        Args:
+            alpha ([type]): [description]
+            fLmbdaEddy ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
+        delta = self._material['lambda']/alpha
+        f = np.full(self._Nx, fLmbdaEddy)
+        n = int(delta/self._h*self._Nx)
+        for i in range(n):
+            f[i] = 1 + (fLmbdaEddy - 1)*self._h/delta*i*self._dx
+        return f
+
+
     def setupModel(
         self, 
         IC=[0., 4.], 
@@ -95,7 +114,8 @@ class IceSheet():
         tStep=120,
         isVerbose=False
     ):
-        """Use default values for water sheet (always the same),
+        """
+        Use default values for water sheet (always the same),
         otherwise (i.e. if ice sheet) always pass parameter values.
 
         Args:

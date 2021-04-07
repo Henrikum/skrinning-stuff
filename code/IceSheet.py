@@ -85,7 +85,7 @@ class IceSheet():
         return u*(self._THi - self._TLo) + self._TLo
 
 
-    def fEddy(self, alpha, fLmbdaEddy):
+    def fEddy(self, Nu, fLmbdaEddy):
         """
         fEddy(for lambda) = fEddy(for sigma)
 
@@ -96,7 +96,8 @@ class IceSheet():
         Returns:
             [type]: [description]
         """
-        delta = self._material['lambda']/alpha
+        delta = self._h/Nu
+        fLmbdaEddy = float(fLmbdaEddy)
         f = np.full(self._Nx, fLmbdaEddy)
         n = int(delta/self._h*self._Nx)
         for i in range(n):
@@ -240,10 +241,13 @@ class IceSheet():
             TAmb = self.makeUOneD(self._IC[0])  # °C
             TBulk = self.makeUOneD(self._IC[-1])  # °C
             # TODO: alphaConv, use windSpeed to get alphaConv
-            # alphaConv = 0.01  # W/m2
+            # alphaConv = 10  # W/m2
             # alphaCond = -self._material['lambda']*(self.makeUOneD(self._IC[1]) - TAmb)/(-self._dx*self._h)/(TBulk - TAmb)
             # alphaBdry = alphaConv + alphaCond  # max(alphaConv, alphaCond)
             alphaBdry = 0
+            # TODO: Nu, lmbdaEddy/lmbda by water velocity
+            Nu = 10
+            fLmbdaEddy = 20
         Bi = alphaBdry*self._h/self._material['lambda']
 
         dx = self._dx
@@ -252,6 +256,12 @@ class IceSheet():
         A = self._A.copy()
         B = self._B.copy()
         b = self._b.copy()
+
+        if self.isWater:
+            fSigma = self.fEddy(Nu, fLmbdaEddy)
+            for i in range(self._Nx):
+                A[i] = A[i]*fSigma
+                B[i] = B[i]*fSigma
 
         if self.isIce:
             # BC at x = 0
@@ -274,8 +284,8 @@ class IceSheet():
             # does not change A, B
 
             # boundary conditions in source term vector
-            b[0] = b[0] + 2*sigma*self._IC[0]  # TAmb
-            b[-1] = b[-1] + 2*sigma*self._IC[-1]  # TBulk
+            b[0] = b[0] + 2*sigma*fSigma[0]*self._IC[0]  # TAmb
+            b[-1] = b[-1] + 2*sigma*fSigma[-1]*self._IC[-1]  # TBulk
 
         return A, B, b
 
@@ -305,18 +315,19 @@ class IceSheet():
             
             if self.isIce:
                 # compute porosity epsilon(t, z)
-                DTMelt = np.maximum(0, self.makeUOneD(U) - 0)
+                DTMelt = np.maximum(0, self.makeUOneD(U) - 0.)
                 porosity = self._material['cp']*DTMelt/(self._materialDH['fusion']*1000)
                 epsSoln.append(porosity)
                 # limit U (due to melting)
-                U = np.minimum(U, np.full(len(U), 1))
+                U = np.minimum(U, np.full(len(U), self.makeTZeroD(0.)))
             else:
                 # compute bottom surface melting
-                dT = self.makeUOneD(U[1]) - 0
+                dT = self.makeUOneD(U[1]) - 0.
                 qDotToBot = -self._material['lambda']*dT/(2*self._dx*self._h)
                 dT = 0 - TIce[dateTimes.index(dateTime), -2]
                 qDotFromBot = -lambdaIce*dT/(2*dxIce*hIce)
                 botMeltRate = -(qDotToBot - qDotFromBot)/(rhoIce*self._materialDH['fusion']*1000)
+                U[0] = self.makeTZeroD(0.)
                 botMeltRates.append(botMeltRate)
 
             USoln.append(U)
@@ -343,5 +354,5 @@ class IceSheet():
 
     
     def setTransmittance(self, sheet):
-        self._transmittance = np.exp(-sheet._material['absorptionCoefficient']*sheet._h)
+        self._transmittance = 0.  # np.exp(-sheet._material['absorptionCoefficient']*sheet._h)
 

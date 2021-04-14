@@ -100,8 +100,18 @@ class IceSheet():
         fLmbdaEddy = float(fLmbdaEddy)  # ---
         f = np.full(Nx, fLmbdaEddy)
         n = int(delta/self._h*Nx)
-        for i in range(n):
-            f[i] = 1. + (fLmbdaEddy - 1)/delta*self._h*dx*i
+
+        # alternative 1
+        # for i in range(n):
+        #     f[i] = 1. + (fLmbdaEddy - 1.)/delta*self._h*dx*i
+
+        # alternative 2: smooth
+        m = -3
+        fBotM = fLmbdaEddy**m
+        for i in range(Nx):
+            fTop = 1. + (fLmbdaEddy - 1.)/delta*(dx*i - 0)
+            f[i] = (fTop**m + fBotM)**(1/m)
+
         print(n, f)
         return f
 
@@ -168,7 +178,7 @@ class IceSheet():
         print(self._A)
         # apply eddy conductivity
         if self.isWater:
-            Nu = max(1., fluidVelocity*10.)  # m/s to ---
+            Nu = max(1., fluidVelocity*100.)  # m/s to ---
             fLmbdaEddy = max(1., fluidVelocity*20.)  # m/s to ---
             fSigma = self.fEddy(Nu, fLmbdaEddy, Nx, dx)
             for i in range(Nx):
@@ -176,6 +186,9 @@ class IceSheet():
                 self._B[i, i] = self._B[i, i] - 1  # diagonal elements are 1 - 2*sigma
                 self._A[i] = self._A[i]*fSigma
                 self._B[i] = self._B[i]*fSigma
+                # for j in range(Nx):
+                #     self._A[i, j] = self._A[i, j]*fSigma[j]
+                #     self._B[i, j] = self._B[i, j]*fSigma[j]
                 self._A[i, i] = self._A[i, i] + 1  # diagonal elements are 1 + 2*sigma
                 self._B[i, i] = self._B[i, i] + 1  # diagonal elements are 1 - 2*sigma
         else:
@@ -196,7 +209,10 @@ class IceSheet():
             self._TLo = IC[0]  # TBot; °C
 
         # IC, linear
-        self.setIC(IC)
+        if self.isIce:
+            self.setIC(IC)
+        else:
+            self.setIC(IC, Nu=Nu)
         U = self._IC
 
         # set self._b
@@ -213,10 +229,29 @@ class IceSheet():
         return A, B, b, U
 
 
-    def setIC(self, IC):
+    def setIC(self, IC, Nu=2.):
         if len(IC) == 2:
-            TInit = np.linspace(IC[0], IC[-1], self._Nx)
             # TInit = np.full(self._Nx, whatnot)
+            if self.isIce:
+                TInit = np.linspace(IC[0], IC[-1], self._Nx)
+            else:
+                heatFlux = Nu*self._material['lambda']/self._h*(IC[-1] - IC[0])
+                dT = heatFlux*self._dx/self._material['lambda']
+                TInit = np.full(self._Nx, IC[-1])
+                m = -3
+                TBotM = IC[-1]**m
+                for i in range(self._Nx):
+                    TTop = IC[0] + dT/self._dx*(self._dx*i - 0)
+                    if i == 0:
+                        TInit[i] = IC[0]
+                    else:
+                        TInit[i] = (TTop**m + TBotM)**(1/m)
+                # TInit = np.full(self._Nx, IC[-1])
+                # delta = self._h/3
+                # n = int(delta/self._h*self._Nx)
+                # for i in range(n):
+                #     TInit[i] = IC[0] + (IC[-1] - IC[0])/delta*self._h*self._dx*i
+            print('TInit: ', TInit)
         else:
             TInit = IC
         UInit = self.makeTZeroD(TInit)
@@ -280,11 +315,25 @@ class IceSheet():
             # BC at x = 1: ghost node
             b[-1] = b[-1] + 2*sigma*self._IC[-1]
         else:
-            # alternative 1: ghost nodes take on Dirichlet BCs
+            # # alternative 1: ghost nodes take on Dirichlet BCs
+            # # BC at x = 0
+            # b[0] = b[0] + 2*sigma*fSigma[0]*self._IC[0]  # UAmb
+            # # BC at x = 1
+            # b[-1] = b[-1] + 2*sigma*fSigma[-1]*self._IC[-1]  # UBulk
+
+            # alternative 2: end nodes take on Dirichlet BCs
             # BC at x = 0
-            b[0] = b[0] + 2*sigma*fSigma[0]*self._IC[0]  # UAmb
+            A[0, 0] = 1.
+            A[0, 1] = 0
+            B[0, 0] = 0
+            B[0, 1] = 0
+            b[0] = self._IC[0]  # UAmb
             # BC at x = 1
-            b[-1] = b[-1] + 2*sigma*fSigma[-1]*self._IC[-1]  # UBulk
+            A[-1, -1] = 1.
+            A[-1, -2] = 0
+            B[-1, -1] = 0
+            B[-1, -2] = 0
+            b[-1] = self._IC[-1]  # UBulk
 
         return A, B, b
 

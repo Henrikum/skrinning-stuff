@@ -62,12 +62,6 @@ class IceSheet():
         self._materialDH = water['enthalpy']
         self._transmittance = 1
 
-        # lake ice properties
-        # dataFile = open(os.path.join(dataFilePath, 'lakeIceProps.json'), 'r')
-        # ice = json.load(dataFile)
-        # dataFile.close()
-        # self._ice = ice[sheet]
-
         print('When: {}'.format(self._dateTimeStart))
         print('Where: lat = {:.2f}°, alt = {:.0f} m'.format(self._lat, self._alt))
         print('What: {}'.format(self._sheet))
@@ -175,7 +169,6 @@ class IceSheet():
         self._A = ss.diags([-sigma, 1 + 2*sigma, -sigma], [-1, 0, 1], shape=(Nx, Nx)).toarray()
         self._B = ss.diags([sigma, 1 - 2*sigma, sigma], [-1, 0, 1], shape=(Nx, Nx)).toarray()
 
-        print(self._A)
         # apply eddy conductivity
         if self.isWater:
             Nu = max(1., fluidVelocity*100.)  # m/s to ---
@@ -186,14 +179,10 @@ class IceSheet():
                 self._B[i, i] = self._B[i, i] - 1  # diagonal elements are 1 - 2*sigma
                 self._A[i] = self._A[i]*fSigma
                 self._B[i] = self._B[i]*fSigma
-                # for j in range(Nx):
-                #     self._A[i, j] = self._A[i, j]*fSigma[j]
-                #     self._B[i, j] = self._B[i, j]*fSigma[j]
                 self._A[i, i] = self._A[i, i] + 1  # diagonal elements are 1 + 2*sigma
                 self._B[i, i] = self._B[i, i] + 1  # diagonal elements are 1 - 2*sigma
         else:
             fSigma = np.full(Nx, 1.0)
-        print(self._A)
 
         # store useful constants
         self._Nx = Nx
@@ -251,7 +240,7 @@ class IceSheet():
                 # n = int(delta/self._h*self._Nx)
                 # for i in range(n):
                 #     TInit[i] = IC[0] + (IC[-1] - IC[0])/delta*self._h*self._dx*i
-            print('TInit: ', TInit)
+            # print('TInit: ', TInit)
         else:
             TInit = IC
         UInit = self.makeTZeroD(TInit)
@@ -312,8 +301,14 @@ class IceSheet():
             B[0, 0] = 1 - 2*(1 + Bi*dx)*sigma
             B[0, 1] = 2*sigma
             b[0] = b[0] + 4*sigma*dx*Bi*self.makeTZeroD(TAmb)
-            # BC at x = 1: ghost node
-            b[-1] = b[-1] + 2*sigma*self._IC[-1]
+            # BC at x = 1: alt. 1, ghost node
+            # b[-1] = b[-1] + 2*sigma*self._IC[-1]
+            # BC at x = 1: alt. 2, end node
+            A[-1, -1] = 1.
+            A[-1, -2] = 0
+            B[-1, -1] = 0
+            B[-1, -2] = 0
+            b[-1] = self._IC[-1]
         else:
             # # alternative 1: ghost nodes take on Dirichlet BCs
             # # BC at x = 0
@@ -359,7 +354,7 @@ class IceSheet():
             
             if self.isIce:
                 # compute porosity epsilon(t, z)
-                DTMelt = np.maximum(0, self.makeUOneD(U) - 0.)
+                DTMelt = np.maximum(0., self.makeUOneD(U) - 0.)
                 porosity = self._material['cp']*DTMelt/(self._materialDH['fusion']*1000)
                 epsSoln.append(porosity)
                 # limit U (due to melting)
@@ -386,43 +381,17 @@ class IceSheet():
 
     
     def setTransmittance(self, sheet):
-        self._transmittance = 0.  # np.exp(-sheet._material['absorptionCoefficient']*sheet._h)
+        self._transmittance = np.exp(-sheet._material['absorptionCoefficient']*sheet._h)
 
-
-    # def bottomMeltRate(self, timeStepCount, TIce=np.array([]), rhoIce=0, lambdaIce=0, dxIce=0, hIce=0):
-        # dateTime = self._dateTimeStart
-        # dateTimes = []
-        # botMeltRates = []
-        # time = 0
-        # if self.isIce:
-        #     for step in range(timeStepCount):
-        #         dateTimes.append(dateTime)
-                
-        #         # water side heat flux
-        #         dT = self.makeUOneD(U[1]) - 0.
-        #         qDotToBot = -self._material['lambda']*dT/(2*self._dx*self._h)
-
-        #         # ice side heat flux
-        #         dT = 0 - TIce[dateTimes.index(dateTime), -2]
-        #         qDotFromBot = -lambdaIce*dT/(2*dxIce*hIce)
-
-        #         botMeltRate = -(qDotToBot - qDotFromBot)/(rhoIce*self._materialDH['fusion']*1000)
-        #         botMeltRates.append(botMeltRate)
-
-        #         time = (step + 1)*self._tStep
-        #         dateTime = self._dateTimeStart + datetime.timedelta(seconds=+time)
-
-
-        # botMeltRates = np.array(botMeltRates)  # m/s at (t, z=hIce); empty if self.isWater
 
     def bottomMeltRates(self, UIce, UWater, waterSheet):
         if self.isIce:
             # water side heat flux
-            dTs = waterSheet.makeUOneD(UWater[:, 1]) - 0.
-            qDotsToBot = -waterSheet._material['lambda']*dTs/(2*waterSheet._dx*waterSheet._h)
+            dTs = waterSheet.makeUOneD(UWater[:, 1]) - waterSheet.makeUOneD(UWater[:, 0])
+            qDotsToBot = -waterSheet._material['lambda']*dTs/(waterSheet._dx*waterSheet._h)
             # ice side heat flux
-            dTs = 0 - self.makeUOneD(UIce[:, -2])
-            qDotsFromBot = -self._material['lambda']*dTs/(2*self._dx*self._h)
+            dTs = self.makeUOneD(UIce[:, -1]) - self.makeUOneD(UIce[:, -2])
+            qDotsFromBot = -self._material['lambda']*dTs/(self._dx*self._h)
             botMeltRates = -(qDotsToBot - qDotsFromBot)/(self._material['rho']*self._materialDH['fusion']*1000)
         else:
             botMeltRates = np.array([])

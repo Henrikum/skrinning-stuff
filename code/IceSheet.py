@@ -347,18 +347,50 @@ class IceSheet():
         dateTimes = []
         S0s = []
         USoln = []
+        dEpsSoln = []
         epsSoln = []
         for step in range(timeStepCount):
             dateTimes.append(dateTime)
             S0s.append(S0)
             
             if self.isIce:
-                # compute porosity epsilon(t, z)
-                DTMelt = np.maximum(0., self.makeUOneD(U) - 0.)
-                porosity = self._material['cp']*DTMelt/(self._materialDH['fusion']*1000)
-                epsSoln.append(porosity)
-                # limit U (due to melting)
-                U = np.minimum(U, np.full(len(U), self.makeTZeroD(0.)))
+                # compute porosity change dEpsilon(t, z) and limit U (due to melting or re-freezing)
+                dEps = []
+                for i in range(self._Nx):
+                    thisT = self.makeUOneD(U[i])
+                    if len(epsSoln) == 0:
+                        lastEps = -1.
+                    else:
+                        lastEps = eps[-1][i]
+                    if thisT >= 0.:
+                        qEps = self._b[i]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
+                        # dEps.append(q/(self._material['rho']*self._materialDH['fusion']*1000*self._dx*self._h))
+                        U[i] = self.makeTZeroD(0.)
+                    elif thisT < 0. and lastEps > 0.:
+                        DTFreeze = thisT
+                        qEps = self._material['rho']*self._dx*self._h*self._material['cp']*DTFreeze  # *self._dy?
+                        U[i] = self.makeTZeroD(0.)
+                    else:
+                        qEps = 0.
+                    dEps.append(qEps/(self._material['rho']*self._materialDH['fusion']*1000*self._dx*self._h))
+                dEpsSoln.append(dEps)
+                # update epsilon(t, z)
+                eps = []
+                if len(epsSoln) == 0:
+                    eps.append(dEps)
+                else:
+                    eps.append(epsSoln[-1])
+                    for i in range(self._Nx):
+                        eps[-1][i] = eps[-1][i] + dEps[i]
+                epsSoln.append(eps[-1])
+
+                # # PREVIOUS CODE
+                # # compute porosity epsilon(t, z)
+                # DTMelt = np.maximum(0., self.makeUOneD(U) - 0.)
+                # porosity = self._material['cp']*DTMelt/(self._materialDH['fusion']*1000)
+                # epsSoln.append(porosity)
+                # # limit U (due to melting)
+                # U = np.minimum(U, np.full(len(U), self.makeTZeroD(0.)))
 
             USoln.append(U)
 
@@ -375,7 +407,9 @@ class IceSheet():
             
         S0s = np.array(S0s)
         USoln = np.array(USoln)
-        epsSoln = np.array(epsSoln)  # fraction at (t, z); empty if self.isWater
+        # dEpsSoln = np.array(dEpsSoln)
+        # epsSoln = np.cumsum(dEpsSoln, axis=0)  # fraction at (t, z); empty if self.isWater
+        epsSoln = np.array(epsSoln)
 
         return dateTimes, S0s, USoln, epsSoln
 

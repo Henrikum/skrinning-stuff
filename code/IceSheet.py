@@ -8,6 +8,7 @@ import scipy.sparse as ss
 
 import datetime
 import solarpy
+import timeit
 
 import geomUtils
 
@@ -16,6 +17,7 @@ import geomUtils
 EPSILON = 0.95
 SIGMA_SB = 5.67E-8  # W/(m2 K4)
 DT_K = 273.15  # K
+N_I = 1  # number of nodes to use when computing the temperature gradient at water--ice interface
 
 class IceSheet():
     """[summary]
@@ -105,8 +107,6 @@ class IceSheet():
         for i in range(Nx):
             fTop = 1. + (fLmbdaEddy - 1.)/delta*(dx*i - 0)
             f[i] = (fTop**m + fBotM)**(1/m)
-
-        print(n, f)
         return f
 
 
@@ -338,6 +338,8 @@ class IceSheet():
 
 
     def simulate(self, U, aEnv, TEnv, timeStepCount):
+        start_time = timeit.default_timer()
+
         dateTime = self._dateTimeStart
         S0 = solarpy.irradiance_on_plane(self._vnorm, self._alt, dateTime, self._lat)
         S0 = S0*self._transmittance
@@ -362,16 +364,36 @@ class IceSheet():
                         lastEps = -1.
                     else:
                         lastEps = eps[i]
-                    if thisT >= 0.:  # -1.e-8:
-                        qEps = self._b[i]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
-                        U[i] = self.makeTZeroD(0.)
-                    elif (thisT < 0.) and (lastEps > 0.):
-                        DTFreeze = max(thisT, -lastEps*self._materialDH['fusion']*1000/self._material['cp'])
-                        DTCool = min(0., thisT - DTFreeze)
-                        qEps = self._material['rho']*self._dx*self._h*self._material['cp']*DTFreeze
-                        U[i] = self.makeTZeroD(DTCool)
+
+                    if i == (self._Nx - 1):
+                        # not all radiation is used to generate epsilon
+                        # radiation to last node
+                        qRad = self._b[i]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
+                        # conduction from last node
+                        dT = self.makeUOneD(U[-1]) - self.makeUOneD(U[-1-N_I])
+                        qCond = -self._material['lambda']*dT/(N_I*self._dx*self._h)
+                        # net heat to consider
+                        qEps = qRad + qCond
+                        # need to check so we don't freeze more epsilon than is available
+                        if qEps < 0.:
+                            if lastEps >= 0.:
+                                qEps = max(qEps, -lastEps*self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000)
+                            else:
+                                qEps = 0.
+                        # the rest is taken care of by the boundary conditions (?)
                     else:
-                        qEps = 0.
+                        if thisT > 0.:  # -1.e-8:
+                            # all excess temperature is used to generate epsilon
+                            qEps = self._material['rho']*self._dx*self._h*self._material['cp']*(thisT - 0.)
+                            U[i] = self.makeTZeroD(0.)
+                        elif (thisT < 0.) and (lastEps > 0.):
+                            # need to check so we don't freeze more epsilon than is available
+                            DTFreeze = max(thisT, -lastEps*self._materialDH['fusion']*1000/self._material['cp'])
+                            DTCool = min(0., thisT - DTFreeze)
+                            qEps = self._material['rho']*self._dx*self._h*self._material['cp']*DTFreeze
+                            U[i] = self.makeTZeroD(DTCool)
+                        else:
+                            qEps = 0.
                     dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
                 dEpsSoln.append(dEps)
                 # update epsilon(t, z), making sure epsilon does not become < 0
@@ -403,10 +425,11 @@ class IceSheet():
         S0s = np.array(S0s)
         USoln = np.array(USoln)
         dEpsSoln = np.array(dEpsSoln)
-        # epsSoln = np.cumsum(dEpsSoln, axis=0)  # fraction at (t, z); empty if self.isWater
         epsSoln = np.array(epsSoln)
 
-        return dateTimes, S0s, USoln, epsSoln, dEpsSoln
+        print('Done. {:0d} steps in {:.0f} s.'.format(timeStepCount, timeit.default_timer() - start_time))
+
+        return dateTimes, S0s, USoln, dEpsSoln, epsSoln
 
     
     def setTransmittance(self, sheet):
@@ -414,14 +437,13 @@ class IceSheet():
 
 
     def bottomMeltRates(self, UIce, UWater, waterSheet):
-        m = 3  # m >= 1
         if self.isIce:
             # water side heat flux
-            dTs = waterSheet.makeUOneD(UWater[:, m]) - waterSheet.makeUOneD(UWater[:, 0])
-            qDotsToBot = -waterSheet._material['lambda']*dTs/(m*waterSheet._dx*waterSheet._h)
+            dTs = waterSheet.makeUOneD(UWater[:, N_I]) - waterSheet.makeUOneD(UWater[:, 0])
+            qDotsToBot = -waterSheet._material['lambda']*dTs/(N_I*waterSheet._dx*waterSheet._h)
             # ice side heat flux
-            dTs = self.makeUOneD(UIce[:, -1]) - self.makeUOneD(UIce[:, -1-m])
-            qDotsFromBot = -self._material['lambda']*dTs/(m*self._dx*self._h)
+            dTs = self.makeUOneD(UIce[:, -1]) - self.makeUOneD(UIce[:, -1-N_I])
+            qDotsFromBot = -self._material['lambda']*dTs/(N_I*self._dx*self._h)
             botMeltRates = -(qDotsToBot - qDotsFromBot)/(self._material['rho']*self._materialDH['fusion']*1000)
         else:
             botMeltRates = np.array([])

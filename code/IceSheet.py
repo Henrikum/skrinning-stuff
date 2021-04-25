@@ -17,7 +17,7 @@ import geomUtils
 EPSILON = 0.95
 SIGMA_SB = 5.67E-8  # W/(m2 K4)
 DT_K = 273.15  # K
-N_I = 1  # number of nodes to use when computing the temperature gradient at water--ice interface
+N_I = 2  # number of nodes to use when computing the temperature gradient at water--ice interface
 
 class IceSheet():
     """[summary]
@@ -163,6 +163,11 @@ class IceSheet():
         sigma = dy/2./dx**2  # sigma(z=0) if lmbda=lmbda(z)
         if isVerbose:
             print('sigma = {}'.format(sigma))
+
+        # the Courant number Co = u*dt/dx = a/dz*dt/dz (?), or Co0 = 1/dx*dy/dx
+        Co = a*tStep/zStep**2
+        Co0 = dy/dx**2
+        print('Co = {:.3f}, Co0 = {:.3f}'.format(Co, Co0))
 
         # set up matrices (will not change with time)
         Nx = zNodes
@@ -351,6 +356,7 @@ class IceSheet():
         USoln = []
         dEpsSoln = []
         epsSoln = []
+        eps = np.full(self._Nx, 0)
         for step in range(timeStepCount):
             dateTimes.append(dateTime)
             S0s.append(S0)
@@ -358,46 +364,47 @@ class IceSheet():
             if self.isIce:
                 # compute porosity change dEpsilon(t, z) and limit U (due to melting or re-freezing)
                 dEps = []
-                for i in range(self._Nx):
-                    thisT = self.makeUOneD(U[i])
-                    if len(epsSoln) == 0:
-                        lastEps = -1.
-                    else:
-                        lastEps = eps[i]
 
-                    if i == (self._Nx - 1):
-                        # not all radiation is used to generate epsilon
-                        # radiation to last node
-                        qRad = self._b[i]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
-                        # conduction from last node
-                        dT = self.makeUOneD(U[-1]) - self.makeUOneD(U[-1-N_I])
-                        qCond = -self._material['lambda']*dT/(N_I*self._dx*self._h)
-                        # net heat to consider
-                        qEps = qRad + qCond
+                # all nodes but the last one
+                for i in range(self._Nx - 1):
+                    thisT = self.makeUOneD(U[i])
+                    lastEps = eps[i]
+                    if thisT > 0.:
+                        # all excess temperature is used to generate epsilon
+                        qEps = self._material['rho']*self._dx*self._h*self._material['cp']*(thisT - 0.)
+                        U[i] = self.makeTZeroD(0.)
+                    elif (thisT < 0.) and (lastEps > 0.):
                         # need to check so we don't freeze more epsilon than is available
-                        if qEps < 0.:
-                            if lastEps >= 0.:
-                                qEps = max(qEps, -lastEps*self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000)
-                            else:
-                                qEps = 0.
-                        # the rest is taken care of by the boundary conditions (?)
+                        DTFreeze = max(thisT, -lastEps*self._materialDH['fusion']*1000/self._material['cp'])
+                        DTCool = min(0., thisT - DTFreeze)
+                        qEps = self._material['rho']*self._dx*self._h*self._material['cp']*DTFreeze
+                        U[i] = self.makeTZeroD(DTCool)
                     else:
-                        if thisT > 0.:  # -1.e-8:
-                            # all excess temperature is used to generate epsilon
-                            qEps = self._material['rho']*self._dx*self._h*self._material['cp']*(thisT - 0.)
-                            U[i] = self.makeTZeroD(0.)
-                        elif (thisT < 0.) and (lastEps > 0.):
-                            # need to check so we don't freeze more epsilon than is available
-                            DTFreeze = max(thisT, -lastEps*self._materialDH['fusion']*1000/self._material['cp'])
-                            DTCool = min(0., thisT - DTFreeze)
-                            qEps = self._material['rho']*self._dx*self._h*self._material['cp']*DTFreeze
-                            U[i] = self.makeTZeroD(DTCool)
-                        else:
-                            qEps = 0.
+                        qEps = 0.
                     dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
+
+                # the last node
+                lastEps = eps[-1]
+                # not all radiation is used to generate epsilon
+                # radiation to last node
+                qRad = self._b[-1]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
+                # conduction from last node
+                dT = self.makeUOneD(U[-1]) - self.makeUOneD(U[-1-N_I])
+                qCond = -self._material['lambda']*dT/(N_I*self._dx*self._h)
+                # net heat to consider
+                qEps = qRad + qCond
+                # need to check so we don't freeze more epsilon than is available
+                if qEps < 0.:
+                    if lastEps > 0.:
+                        qEps = max(qEps, -lastEps*self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000)
+                    else:
+                        qEps = 0.
+                # the rest is taken care of by the boundary conditions (?)
+                dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
+
                 dEpsSoln.append(dEps)
                 # update epsilon(t, z), making sure epsilon does not become < 0
-                eps = np.sum(np.array(dEpsSoln), axis=0)
+                eps = eps + np.array(dEpsSoln[-1])
                 eps = np.maximum(0., eps)
                 epsSoln.append(list(eps))
 

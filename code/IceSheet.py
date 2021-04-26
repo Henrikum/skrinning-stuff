@@ -356,6 +356,7 @@ class IceSheet():
         USoln = []
         dEpsSoln = []
         epsSoln = []
+        qRadSoln = []
         eps = np.full(self._Nx, 0)
         for step in range(timeStepCount):
             dateTimes.append(dateTime)
@@ -384,23 +385,31 @@ class IceSheet():
                     dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
 
                 # the last node
-                lastEps = eps[-1]
-                # not all radiation is used to generate epsilon
-                # radiation to last node
-                qRad = self._b[-1]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
-                # conduction from last node
-                dT = self.makeUOneD(U[-1]) - self.makeUOneD(U[-1-N_I])
-                qCond = -self._material['lambda']*dT/(N_I*self._dx*self._h)
-                # net heat to consider
-                qEps = qRad + qCond
-                # need to check so we don't freeze more epsilon than is available
-                if qEps < 0.:
-                    if lastEps > 0.:
-                        qEps = max(qEps, -lastEps*self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000)
-                    else:
-                        qEps = 0.
-                # the rest is taken care of by the boundary conditions (?)
-                dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
+                # lastEps = eps[-1]
+                # # not all radiation is used to generate epsilon
+                # # radiation to last node
+                # qRad = self._b[-1]*self._material['lambda']/self._h**2*(self._THi - self._TLo)
+                # # conduction from last node
+                # dT = self.makeUOneD(U[-1]) - self.makeUOneD(U[-1-N_I])
+                # qCond = -self._material['lambda']*dT/(N_I*self._dx*self._h)
+                # # net heat to consider
+                # qEps = qRad + qCond
+                # # need to check so we don't freeze more epsilon than is available
+                # if qEps < 0.:
+                #     if lastEps > 0.:
+                #         qEps = max(qEps, -lastEps*self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000)
+                #     else:
+                #         qEps = 0.
+                # # the rest is taken care of by the boundary conditions (?)
+                # dEps.append(qEps/(self._material['rho']*self._dx*self._h*self._materialDH['fusion']*1000))
+                # dEps.append(2*(dEps[-1] - dEps[-2]) + dEps[-2])
+                # dEps.append(dEps[-1] - 2*dEps[-2] + dEps[-3])
+
+                # second-order extrapolation of epsilon; note len(dEps) = len(eps) - 1 at this stage
+                # eps[-4]+dEps[-3] - 2*(eps[-3]+dEps[-2]) + eps[-2]+dEps[-1] = eps[-1]+dEps["0"]
+                epsBot = max(0., eps[-4]+dEps[-3] - 3*(eps[-3]+dEps[-2]) + 3*(eps[-2]+dEps[-1]))
+                dEpsBot = epsBot - eps[-1]
+                dEps.append(dEpsBot)
 
                 dEpsSoln.append(dEps)
                 # update epsilon(t, z), making sure epsilon does not become < 0
@@ -417,6 +426,7 @@ class IceSheet():
                 # U = np.minimum(U, np.full(len(U), self.makeTZeroD(0.)))
 
             USoln.append(U)
+            qRadSoln.append(list(self._b*self._material['lambda']/self._h**2*(self._THi - self._TLo)))
 
             time = (step + 1)*self._tStep
             dateTime = self._dateTimeStart + datetime.timedelta(seconds=+time)
@@ -433,10 +443,11 @@ class IceSheet():
         USoln = np.array(USoln)
         dEpsSoln = np.array(dEpsSoln)
         epsSoln = np.array(epsSoln)
+        qRadSoln = np.array(qRadSoln)
 
         print('Done. {:0d} steps in {:.0f} s.'.format(timeStepCount, timeit.default_timer() - start_time))
 
-        return dateTimes, S0s, USoln, dEpsSoln, epsSoln
+        return dateTimes, S0s, USoln, dEpsSoln, epsSoln, qRadSoln
 
     
     def setTransmittance(self, sheet):
